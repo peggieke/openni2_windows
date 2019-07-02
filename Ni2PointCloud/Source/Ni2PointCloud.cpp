@@ -39,9 +39,9 @@ Mat niComputeCloud( const Mat depthMap, const VideoStream& depthStream )
 
 int main( int argc, char* argv[] )
 {
-    double fx, fy, cx, cy;
     float hfov, vfov;
     Status status;
+    bool isColorValid = false;
 
     // Create window
     viz::Viz3d myWindow( "Point Cloud" );
@@ -59,23 +59,17 @@ int main( int argc, char* argv[] )
         return 1;
     }
 
-    //Check and enable Depth-To-Color image registration
-    if( !devDevice.isImageRegistrationModeSupported( IMAGE_REGISTRATION_DEPTH_TO_COLOR ) )
-    {
-        cout << "ERROR: ImageRegistration mode is not supported" << endl << endl;
-        return 1;
-    }
-    devDevice.setImageRegistrationMode( IMAGE_REGISTRATION_DEPTH_TO_COLOR );
-
     VideoMode mode;
     VideoStream vsDepth;
     VideoStream vsColor;
 
+    // Create and setup depth stream
     if ( STATUS_OK != vsDepth.create( devDevice, SENSOR_DEPTH ) )
     {
         cout << "ERROR: Cannot create depth stream on device" << endl << endl;
         return 1;
     }
+    vsDepth.setMirroringEnabled( false );
 
     mode = vsDepth.getVideoMode();
     cout << "Depth VideoMode: " << mode.getResolutionX() << " x " << mode.getResolutionY() << " @ " << mode.getFps() << " FPS";
@@ -90,30 +84,54 @@ int main( int argc, char* argv[] )
     }
     cout << endl;
 
-    vsDepth.setMirroringEnabled( false );
+    status = vsDepth.getProperty<float>( ONI_STREAM_PROPERTY_HORIZONTAL_FOV, &hfov );
+    status = vsDepth.getProperty<float>( ONI_STREAM_PROPERTY_VERTICAL_FOV, &vfov );
+    viz::Camera tofcam( Vec2f( hfov, vfov ), Size( mode.getResolutionX(), mode.getResolutionY() ) );
+
+    // Create and setup color stream
+    if ( STATUS_OK != vsColor.create( devDevice, SENSOR_COLOR ) )
+    {
+        cout << "ERROR: Cannot create color stream on device" << endl << endl;
+    }
+    else
+    {
+        vsColor.setMirroringEnabled( false );
+    }
+
+    // Check and enable Depth-To-Color image registration
+    if ( vsColor.isValid() )
+    {
+        if ( devDevice.isImageRegistrationModeSupported( IMAGE_REGISTRATION_DEPTH_TO_COLOR ) )
+        {
+            if ( STATUS_OK == devDevice.setImageRegistrationMode( IMAGE_REGISTRATION_DEPTH_TO_COLOR ) )
+            {
+                isColorValid = true;
+            }
+            else
+            {
+                cout << "ERROR: Failed to set imageRegistration mode" << endl << endl;
+            }
+        }
+        else
+        {
+            cout << "ERROR: ImageRegistration mode is not supported" << endl << endl;
+        }
+    }
+
+    // Start streams
     if ( STATUS_OK != vsDepth.start() )
     {
         cout << "ERROR: Cannot start depth stream on device" << endl << endl;
         return 1;
     }
-
-    if ( STATUS_OK != vsColor.create( devDevice, SENSOR_COLOR ) )
+    if ( isColorValid )
     {
-        cout << "ERROR: Cannot create color stream on device" << endl << endl;
-        return 1;
+        if ( STATUS_OK != vsColor.start() )
+        {
+            cout << "ERROR: Cannot start color stream on device" << endl << endl;
+            return 1;
+        }
     }
-
-    vsColor.setMirroringEnabled( false );
-    if ( STATUS_OK != vsColor.start() )
-    {
-        cout << "ERROR: Cannot start color stream on device" << endl << endl;
-        return 1;
-    }
-
-    status = vsDepth.getProperty<float>( ONI_STREAM_PROPERTY_HORIZONTAL_FOV, &hfov );
-    status = vsDepth.getProperty<float>( ONI_STREAM_PROPERTY_VERTICAL_FOV, &vfov );
-
-    viz::Camera tofcam( Vec2f( hfov, vfov ), Size( mode.getResolutionX(), mode.getResolutionY() ) );
 
     /*
      * Transformation: from global frame to camera frame
@@ -152,9 +170,14 @@ int main( int argc, char* argv[] )
             if ( STATUS_OK == vsDepth.readFrame( &dFrame) )
             {
                 imgDepth = Mat( dFrame.getHeight(), dFrame.getWidth(), CV_16UC1, ( void* )dFrame.getData() );
+                if ( !isColorValid )
+                {
+                    imgDepth.convertTo( imgColor, CV_8U, 255.0 / 4096 );
+                    applyColorMap( imgColor, imgColor, COLORMAP_JET );
+                }
             }
         }
-        if ( vsColor.isValid() )
+        if ( isColorValid && vsColor.isValid() )
         {
             if ( STATUS_OK == vsColor.readFrame( &cFrame) )
             {
@@ -163,27 +186,33 @@ int main( int argc, char* argv[] )
             }
         }
 
-        //Process Point Cloud
+        // Process Point Cloud
         if( !imgDepth.empty() && !imgColor.empty() )
         {
             mPointCloud = niComputeCloud( imgDepth, vsDepth );
             viz::WCloud pointCloud( mPointCloud, imgColor );
             myWindow.showWidget( "Point Cloud", pointCloud, cloud_pose_global );
             myWindow.showWidget( "Watermark", cv::viz::WText( "LIPS Corp Copyright 2018",
-                                                            Point( dFrame.getWidth() / 32.0, dFrame.getHeight() / 24.0 ),
-                                                            dFrame.getWidth() *  15.0 / 640.0, FONT_HERSHEY_SIMPLEX ) );
+                                                              Point( dFrame.getWidth() / 32.0, dFrame.getHeight() / 24.0 ),
+                                                              dFrame.getWidth() *  15.0 / 640.0, FONT_HERSHEY_SIMPLEX ) );
             myWindow.spinOnce( 1, true ); //pause 1ms to listen mouse events, set true to re-draw
         }
         //
         //In Viz, press e/E to terminate the viewer
         //
-    } while ( !myWindow.wasStopped() );
+    }
+    while ( !myWindow.wasStopped() );
 
     myWindow.removeWidget( "Point Cloud" );
     myWindow.removeWidget( "Watermark" );
 
+    vsDepth.stop();
     vsDepth.destroy();
-    vsColor.destroy();
+    if ( isColorValid )
+    {
+        vsColor.stop();
+        vsColor.destroy();
+    }
 
     devDevice.close();
     OpenNI::shutdown();
