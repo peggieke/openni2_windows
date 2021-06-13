@@ -36,13 +36,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     if(MSVC)
         add_definitions(/DWINDOWS /D_WINDOWS /DPLAT_WINDOWS /DWIN32)
     endif()
-
-    string(FIND ${CMAKE_GENERATOR} "Win64" result)
-    if(result EQUAL -1)
-        set(HOST_ARCH x86)
-    else()
+    if (CMAKE_SIZEOF_VOID_P EQUAL 8)
         set(HOST_ARCH x64)
-    endif()
+    elseif (CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(HOST_ARCH x86)
+    endif ()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(LINUX 1)
     add_definitions(-DLINUX -DPLAT_LINUX -Dlinux -std=c++11)
@@ -65,28 +63,42 @@ endif()
 ## Locate OpenNI2 Header and Library Path ##
 if(WINDOWS)
     if(HOST_ARCH STREQUAL "x64")
-        set(OPENNI2_INC_DIR $ENV{OPENNI2_INCLUDE64} CACHE PATH "OpenNI2 Include Header Directory")
-        set(OPENNI2_LIB_DIR $ENV{OPENNI2_LIB64} CACHE PATH "OpenNI2 Linking Library Directory")
+        find_path( OPENNI2_INC NAMES OpenNI.h HINTS
+            "$ENV{OPENNI2_INCLUDE64}"
+            DOC "OpenNI2 Include Header Directory"
+            NO_DEFAULT_PATH
+        )
+        find_library( OPENNI2_LIB NAMES OpenNI2 HINTS
+            "$ENV{OPENNI2_LIB64}"
+            DOC "OpenNI2 Linking Library Directory"
+            NO_DEFAULT_PATH
+        )
     else()
-        set(OPENNI2_INC_DIR $ENV{OPENNI2_INCLUDE} CACHE PATH "OpenNI2 Include Header Directory")
-        set(OPENNI2_LIB_DIR $ENV{OPENNI2_LIB} CACHE PATH "OpenNI2 Linking Library Directory")
+        find_path( OPENNI2_INC NAMES OpenNI.h HINTS
+            "$ENV{OPENNI2_INCLUDE}"
+            DOC "OpenNI2 Include Header Directory"
+            NO_DEFAULT_PATH
+        )
+        find_library( OPENNI2_LIB NAMES OpenNI2 HINTS
+            "$ENV{OPENNI2_LIB}"
+            DOC "OpenNI2 Linking Library Directory"
+            NO_DEFAULT_PATH
+        )
     endif()
 elseif(LINUX)
-    set(OPENNI2_INC_DIR "/usr/include/openni2" CACHE PATH "OpenNI2 Include Header Directory")
-    set(OPENNI2_LIB_DIR ${CMAKE_INSTALL_PREFIX} CACHE PATH "OpenNI2 Linking Library Directory")
+    find_path( OPENNI2_INC NAMES OpenNI.h HINTS
+        "$ENV{OPENNI2_INCLUDE}"
+        DOC "OpenNI2 Include Header Directory"
+        NO_DEFAULT_PATH
+    )
+    find_library( OPENNI2_LIB NAMES OpenNI2 HINTS
+        "$ENV{OPENNI2_REDIST}"
+        DOC "OpenNI2 Linking Library Directory"
+        NO_DEFAULT_PATH
+    )
 else()
     message(FATAL_ERROR "Unknown Host Platform!")
 endif()
-
-find_path(OPENNI2_INC OpenNI.h PATHS ${OPENNI2_INC_DIR} NO_DEFAULT_PATH)
-find_library(OPENNI2_LIB OpenNI2 PATHS ${OPENNI2_LIB_DIR} NO_DEFAULT_PATH)
-if((NOT OPENNI2_INC) OR (NOT OPENNI2_LIB))
-    message("\nFailed to find OpenNI2, please check and update the following directories:")
-    message("\tOPENNI2_INC_DIR = " ${OPENNI2_INC_DIR})
-    message("\tOPENNI2_LIB_DIR = " ${OPENNI2_LIB_DIR})
-    message(FATAL_ERROR "OpenNI2 NOT Found!")
-endif()
-
 
 message(STATUS "\n====================================================================================================")
 message(STATUS "CMAKE_BUILD_TYPE = " ${CMAKE_BUILD_TYPE})
