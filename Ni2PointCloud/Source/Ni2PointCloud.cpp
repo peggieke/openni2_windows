@@ -30,6 +30,7 @@ GLFWwindow* window;
 GLuint helpScreenTextureID;
 bool bComputeCloud, bQuit;
 bool bShowHelpScreen;
+bool bVisualizedRGBFrame;
 int windowWidth, windowHeight;
 int frameWidth, frameHeight;
 
@@ -131,7 +132,7 @@ void drawHelpScreen()
     glPopAttrib();
 }
 
-void drawPointCloud( float **imgDepth, float **imgColor, int imgSize )
+void drawPointCloud( float **colorArr, float **vertexArr, int imgSize )
 {
     glLoadIdentity();
     glPushAttrib( GL_ALL_ATTRIB_BITS );
@@ -156,10 +157,10 @@ void drawPointCloud( float **imgDepth, float **imgColor, int imgSize )
     glBegin( GL_POINTS );
     for ( int i = 0; i < imgSize; i++ )
     {
-        if ( imgDepth[i][2] != 0 )
+        if ( vertexArr[i][2] != 0 )
         {
-            glColor3f( imgColor[i][0], imgColor[i][1], imgColor[i][2] );
-            glVertex3f( imgDepth[i][0], imgDepth[i][1], imgDepth[i][2] );
+            glColor3f( colorArr[i][0], colorArr[i][1], colorArr[i][2] );
+            glVertex3f( vertexArr[i][0], vertexArr[i][1], vertexArr[i][2] );
         }
     }
     glEnd();
@@ -215,6 +216,10 @@ void key_callback( GLFWwindow* window, int key, int scancode, int action, int mo
         {
             bShowHelpScreen ^= true;
         }
+        else if ( key == GLFW_KEY_C )
+        {
+            bVisualizedRGBFrame ^= true;
+        }
     }
 }
 
@@ -245,37 +250,70 @@ void scroll_callback( GLFWwindow* window, double xoffset, double yoffset )
     viewerStat.offsetY -= static_cast<float>( yoffset * 100 );
 }
 
-void niComputeCloud( const VideoStream &depthStream, VideoFrameRef *dFrame, VideoFrameRef *cFrame, float **imgDepth, float **imgColor )
+void colorMap( float dis, float *outputR, float *outputG, float *outputB )
 {
-    const openni::DepthPixel* pDepth = ( const openni::DepthPixel* )dFrame->getData();
-    const openni::RGB888Pixel* pColor = ( const openni::RGB888Pixel* )cFrame->getData();
+    int r, g, b;// 0 ~ 255
+    int map[5][4] =
+    {
+        // {distance, R, G, B}
+        {0, 0, 0, 255},
+        {500, 0, 255, 255},
+        {1000, 255, 255, 0},
+        {2000, 255, 0, 0},
+        {4000, 102, 0, 0}
+    };
+    if ( dis >= map[4][0] )
+    {
+        r = map[4][1];
+        g = map[4][2];
+        b = map[4][3];
+    }
+    else
+    {
+        for ( int i = 0; i < 4; i++ )
+        {
+            if ( map[i][0] <= dis && dis < map[i + 1][0] )
+            {
+                float t =  ( dis - map[i][0] ) / ( map[i + 1][0] - map[i][0] );
+                r = map[i][1] + ( map[i + 1][1] - map[i][1] ) * t;
+                g = map[i][2] + ( map[i + 1][2] - map[i][2] ) * t;
+                b = map[i][3] + ( map[i + 1][3] - map[i][3] ) * t;
+                break;
+            }
+        }
+    }
+    *outputR = r / 255.0;
+    *outputG = g / 255.0;
+    *outputB = b / 255.0;
+}
 
+void niComputeCloud( const VideoStream &depthStream, const void* depthFrameData, const void* colorFrameData,
+                     float **imgDepth, float **imgColor, float **imgColorMap )
+{
+    const openni::DepthPixel* pDepth = ( const openni::DepthPixel* )depthFrameData;
+    const openni::RGB888Pixel* pColor = ( const openni::RGB888Pixel* )colorFrameData;
     float fX, fY, fZ;
-    int i = 0;
-
-    for ( int y = 0; y < frameHeight; y++ )
+    for ( int y = 0, i = 0; y < frameHeight; y++ )
     {
         for ( int x = 0; x < frameWidth; x++ )
         {
+            fX = 0.0;
+            fY = 0.0;
+            fZ = 0.0;
             if ( pDepth[i] != 0 )
             {
                 CoordinateConverter::convertDepthToWorld( depthStream, x, y, pDepth[i], &fX, &fY, &fZ );
-                imgColor[i][0] = pColor[i].r / 255.0;
-                imgColor[i][1] = pColor[i].g / 255.0;
-                imgColor[i][2] = pColor[i].b / 255.0;
-                imgDepth[i][0] = fX;
-                imgDepth[i][1] = fY;
-                imgDepth[i][2] = fZ;
+                if ( pColor != nullptr )
+                {
+                    imgColor[i][0] = pColor[i].r / 255.0;
+                    imgColor[i][1] = pColor[i].g / 255.0;
+                    imgColor[i][2] = pColor[i].b / 255.0;
+                }
+                colorMap( pDepth[i], &imgColorMap[i][0], &imgColorMap[i][1], &imgColorMap[i][2] );
             }
-            else
-            {
-                imgColor[i][0] = 0.0;
-                imgColor[i][1] = 0.0;
-                imgColor[i][2] = 0.0;
-                imgDepth[i][0] = 0.0;
-                imgDepth[i][1] = 0.0;
-                imgDepth[i][2] = 0.0;
-            }
+            imgDepth[i][0] = fX;
+            imgDepth[i][1] = fY;
+            imgDepth[i][2] = fZ;
             i++;
         }
     }
@@ -336,6 +374,7 @@ void initViewer()
     bComputeCloud = true;
     bQuit = false;
     bShowHelpScreen = true;
+    bVisualizedRGBFrame = true;
 }
 
 int main( void )
@@ -345,6 +384,7 @@ int main( void )
     int resolution = 0;
     float **imgColor;
     float **imgDepth;
+    float **imgColorMap;
 
     initViewer();
 
@@ -390,11 +430,13 @@ int main( void )
 
     imgColor = new float* [resolution];
     imgDepth = new float* [resolution];
+    imgColorMap = new float* [resolution];
 
     for ( int i = 0; i < resolution; i++ )
     {
         imgColor[i] = new float [3];
         imgDepth[i] = new float [3];
+        imgColorMap[i] = new float [3];
     }
 
     frameWidth = mode.getResolutionX();
@@ -454,7 +496,6 @@ int main( void )
 
     VideoFrameRef dFrame;
     VideoFrameRef cFrame;
-    bool bDepthReadFrame, bColorReadFrame;
 
     // Loop until the user closes the window
     while ( !glfwWindowShouldClose( window ) )
@@ -465,36 +506,38 @@ int main( void )
 
         if ( bComputeCloud )
         {
-            bDepthReadFrame = false;
-            bColorReadFrame = false;
-
             if ( vsDepth.isValid() )
             {
-                if ( STATUS_OK == vsDepth.readFrame( &dFrame ) )
+                if ( STATUS_OK != vsDepth.readFrame( &dFrame ) )
                 {
-                    bDepthReadFrame = true;
+                    break;
                 }
             }
 
             if ( isColorValid && vsColor.isValid() )
             {
-                if ( STATUS_OK == vsColor.readFrame( &cFrame ) )
+                if ( STATUS_OK != vsColor.readFrame( &cFrame ) )
                 {
-                    bColorReadFrame = true;
+                    break;
                 }
-            }
-
-            if ( bDepthReadFrame == true && bColorReadFrame == true )
-            {
-                niComputeCloud( vsDepth, &dFrame, &cFrame, imgDepth, imgColor );
+                niComputeCloud( vsDepth, ( const openni::DepthPixel* )dFrame.getData(), ( const openni::RGB888Pixel* )cFrame.getData(),
+                                imgDepth, imgColor, imgColorMap );
             }
             else
             {
-                bQuit = true;
+                niComputeCloud( vsDepth, ( const openni::DepthPixel* )dFrame.getData(), nullptr,
+                                imgDepth, imgColor, imgColorMap );
             }
         }
 
-        drawPointCloud( imgDepth, imgColor, resolution );
+        if ( isColorValid && bVisualizedRGBFrame )
+        {
+            drawPointCloud( imgColor, imgDepth, resolution );
+        }
+        else
+        {
+            drawPointCloud( imgColorMap, imgDepth, resolution );
+        }
 
         if ( bShowHelpScreen )
         {
