@@ -17,7 +17,6 @@ struct viewerState
     double pitch;
     double lastX;
     double lastY;
-    float offsetX;
     float offsetY;
     float lookatX;
     float lookatY;
@@ -106,23 +105,23 @@ void drawHelpScreen()
     glEnable( GL_DEPTH_TEST );
     glEnable( GL_TEXTURE_2D );
 
-    float minX = windowWidth - helpScreenWidth, maxX = windowWidth;
-    float minY = windowHeight - helpScreenHeight, maxY = windowHeight;
+    int minX = windowWidth - helpScreenWidth, maxX = windowWidth;
+    int minY = windowHeight - helpScreenHeight, maxY = windowHeight;
 
     glBindTexture( GL_TEXTURE_2D, helpScreenTextureID );
     glBegin( GL_POLYGON );
 
     glTexCoord2f( 0.0, 0.0 );
-    glVertex2f( minX, minY );
+    glVertex2i( minX, minY );
 
     glTexCoord2f( 1.0, 0.0 );
-    glVertex2f( maxX, minY );
+    glVertex2i( maxX, minY );
 
     glTexCoord2f( 1.0, 1.0 );
-    glVertex2f( maxX, maxY );
+    glVertex2i( maxX, maxY );
 
     glTexCoord2f( 0.0, 1.0 );
-    glVertex2f( minX, maxY );
+    glVertex2i( minX, maxY );
 
     glEnd();
     glMatrixMode ( GL_PROJECTION );
@@ -151,7 +150,7 @@ void drawPointCloud( float **colorArr, float **vertexArr, int imgSize )
     glRotated( viewerStat.pitch, 1, 0, 0 );
     glRotated( viewerStat.yaw, 0, 1, 0 );
     glTranslatef( 0, 0, -0.5f );
-    glPointSize( windowWidth / 640.0 );
+    glPointSize( windowWidth / 640.0f );
     glEnable( GL_DEPTH_TEST );
 
     glBegin( GL_POINTS );
@@ -199,7 +198,6 @@ void key_callback( GLFWwindow* window, int key, int scancode, int action, int mo
         {
             viewerStat.yaw = 0.0;
             viewerStat.pitch = 0.0;
-            viewerStat.offsetX = 0.0;
             viewerStat.offsetY = 0.0;
             viewerStat.lookatX = 0.0;
             viewerStat.lookatY = 0.0;
@@ -246,7 +244,6 @@ void mouse_button_callback( GLFWwindow* window, int button, int action, int mods
 
 void scroll_callback( GLFWwindow* window, double xoffset, double yoffset )
 {
-    viewerStat.offsetX -= static_cast<float>( xoffset * 100 );
     viewerStat.offsetY -= static_cast<float>( yoffset * 100 );
 }
 
@@ -365,7 +362,6 @@ void initViewer()
     viewerStat.pitch = 0.0;
     viewerStat.lastX = 0.0;
     viewerStat.lastY = 0.0;
-    viewerStat.offsetX = 0.0;
     viewerStat.offsetY = 0.0;
     viewerStat.lookatX = 0.0;
     viewerStat.lookatY = 0.0;
@@ -379,7 +375,6 @@ void initViewer()
 
 int main( void )
 {
-    Status status;
     bool isColorValid = false;
     int resolution = 0;
     float **imgColor;
@@ -569,9 +564,11 @@ int main( void )
     for ( int i = 0; i < resolution; i++ )
     {
         delete [] imgColor[i];
+        delete [] imgColorMap[i];
         delete [] imgDepth[i];
     }
     delete [] imgColor;
+    delete [] imgColorMap;
     delete [] imgDepth;
 
     glfwTerminate();
